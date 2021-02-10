@@ -71,7 +71,7 @@
     dest=/etc/fail2ban/action.d/shared-f2b/shared_cfg.py 
 
 # copy eh ssh and apache-no-script jails
-- name: Copy jails ssh and the apache no-script
+- name: Copy jails ssh and any other you add
   copy:
     src: "{{ item }}"
     dest: /etc/fail2ban/jail.d/
@@ -79,8 +79,22 @@
     mode: 0600
   with_items:
     - jail-sf2b-ssh.local 
-    - jail-sf2b-apache-noscript.local 
-    
+
+# this is now optional as if you install it on non web server fail2ban wont start 
+- name: Copy jail apache no-script
+  copy:
+    src: jail-sf2b-apache-noscript.local
+    dest: /etc/fail2ban/jail.d/
+    owner: root
+    mode: 0600
+  when:   web_jails   == "y" or   web_jails   == "Y" or web_jails  == 'YES' or  web_jails  == 'yes'  
+
+
+
+
+
+
+#web_jails
 ##
 ##
 ##

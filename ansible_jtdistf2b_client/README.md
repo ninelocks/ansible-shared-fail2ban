@@ -28,6 +28,8 @@ installer will prompt for
     api_or_sql whether clinet access DB directly or via api call
 
     api_port which port number the api runs on
+
+    web_jails if web specific jails should be installed on client       
 ```
 
 Dependencies

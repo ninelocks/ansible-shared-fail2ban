@@ -41,6 +41,11 @@
       default: "5000"
       private: no  
 
+    - name: web_jails
+      prompt: "install web jails will only install for y or Y or yes or YES"
+      default: "no"
+      private: no 
+
   roles:
     - jtdistf2b_client
  
