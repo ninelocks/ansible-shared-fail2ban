@@ -1,0 +1,73 @@
+ 
+- name: jtdistf2b_server  deployment playbook
+  # for setting up the durham fail2ban project as dev environs for jont@ninelocks
+  hosts: all
+  #connection: local
+  become: yes
+  become_method: sudo
+  #remote_user: vagrant
+  vars:
+    f2b_home: /opt
+   
+    #db_user: "bert"
+    #db_pass: "ernie"
+    #random key fr the wsgi password
+    app_random_key: "{{ lookup('password', '/dev/null length=15 chars=ascii_letters') }}"
+  #  mysql_root_password: ***REMOVED***
+  #  owncloudsqlpw: ***REMOVED***
+  #  owncloud_data: /var/www/owncloud
+
+  vars_prompt:
+    - name: mysql_root_password
+      prompt: "Please enter the value for sql root password"
+      private: no 
+
+      # these used as the use we create for the api to access the database
+    - name: db_user
+      prompt: "Please enter the value for api USERNAME to use for DB"
+      private: no 
+      default: "bert"
+    - name: db_pass
+      prompt: "Please enter the value for api PASSWORD to use for DB"
+      private: no             
+
+    - name: api_port
+      prompt: "api port number ..normally 80 or alternate if server doing other stuff! )"
+      default: "5000"
+      private: no  
+
+      # these used as the use we create for the api to access the database
+    - name: htaccess_username
+      prompt: "Please enter the value for htaccess USERNAME to use for web page"
+      private: no 
+      default: "support"
+    - name: htaccess_password
+      prompt: "Please enter the value for htaccess PASSWORD to use for the web page"
+      private: no             
+
+
+    # {{f2b_home}}  ie /opt  
+    #- name: admin_ip
+    #  prompt: "Please enter the value for admin ip allow"
+    #  private: no 
+
+  #  - name: owncloudsqlpw
+  #    prompt: "Please enter the value for owncloud sql password"
+  #    private: no       
+
+  #  - name: owncloud_data
+  #    prompt: "Please enter the value for data folder mainly for logrotatees benefit"
+  #    private: no 
+  #
+  #  - name: apachewebaddress
+  #    prompt: "Please enter web address of apache"
+  #    private: no 
+
+
+ 
+      
+  
+  roles:
+    - jtdistf2b_server
+ 
+  

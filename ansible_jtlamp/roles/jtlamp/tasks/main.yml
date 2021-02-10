@@ -1,0 +1,456 @@
+---
+# tasks file lamp on centos and ubuntu hopefully, based on ourt owncloud installer
+# based loosely on https://www.tecmint.com/install-owncloud-on-ubuntu/
+# but with ansible goodness mixed in by jjt
+#see more notes at https://doc.owncloud.com/server/admin_manual/installation/ubuntu_18_04.html
+#for some reason ubuntu 20.04 refuses to setup php my admin correctly
+# this ONLY tested for centos 7 and ubuntu 20.04
+
+  # had problem making installer use python3 on ubuntu
+  # and centos didnt like python 3 so a bit of a hack
+  - name: make ubuntu ansible use python3
+    set_fact:
+      ansible_python_interpreter: /usr/bin/python3
+    when: ansible_distribution == "Ubuntu"  and ansible_facts['distribution_major_version'] == '20'   
+
+  # some messages so we know what python ansible is actually using
+  - debug: var=ansible_python_interpreter
+  - debug: var=ansible_python_version
+
+#
+#
+# klumsy but here we set some os specific variables mainly to reduce
+# os specific stanzas later
+#
+#
+
+  - name: set os specific variables for Ubuntu
+    set_fact:
+        web_server_program: apache2
+    when: ansible_distribution == "Ubuntu"  and ansible_facts['distribution_major_version'] == '20'   
+
+  - name: set os specific variables for Centos
+    set_fact:
+        web_server_program: httpd
+    when: ansible_distribution == "CentOS"  
+
+
+   #see https://fedoraproject.org/wiki/EPEL
+  - name: Ensure EPEL is enabled 
+    package: 
+      name:  https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+      state: present 
+    when: ansible_distribution == "CentOS" 
+
+  #see https://fedoraproject.org/wiki/EPEL
+  - name: Ensure php repo 
+    yum: 
+      name:  http://rpms.remirepo.net/enterprise/remi-release-7.rpm
+      state: present 
+      update_cache: true
+    when: ansible_distribution == "CentOS" 
+
+  #got fed up trying to debg why ansible would not do this using the repo tools so..
+  - name: install yum config manager
+    package:
+      name:
+        - yum-utils
+    when: ansible_distribution == "CentOS"      
+
+  - name: disable remi-php54
+    shell: yum-config-manager --disable remi-php54
+    when: ansible_distribution == "CentOS" 
+    
+  - name: enable remi-php73
+    shell: yum-config-manager --enable remi-php73
+    when: ansible_distribution == "CentOS" 
+
+  - name: install updates
+    yum: name=* state=latest
+    when: ansible_distribution == "CentOS" 
+
+
+  - name: install  httpd php etc etc 
+    package:
+      name:
+        - httpd 
+        - php
+        - php-mysql
+        - php-mbstring 
+        - python-pip
+        - mod_wsgi
+        
+      
+      state: present        
+    when: ansible_distribution == "CentOS" 
+
+  # may have gone overboard on php modules here
+  # todo come back use variable for the php version
+  - name: install the latest version of Apache ,php and utils we need like pip
+    package:
+      name:
+        - apache2 
+        - libapache2-mod-wsgi
+        - php7.4 
+        - libapache2-mod-php7.4 
+        - php7.4-mysql 
+        - php-common 
+        - php7.4-cli 
+        - php7.4-common 
+        - php7.4-json 
+        - php7.4-opcache 
+        - php7.4-readline
+        - python3-pip
+ 
+      state: latest
+    when: ansible_distribution == "Ubuntu"  
+
+
+  - name: Enable service apache2 so it autostarts, and not touch the state
+    service:
+      name: apache2
+      enabled: yes    
+    when: ansible_distribution == "Ubuntu"     
+
+  - name: install PyMySQL
+    pip:
+        name: PyMySQL
+    when: ansible_distribution == "Ubuntu"  and ansible_facts['distribution_major_version'] == '20'   
+
+  - name: install modules on apache system,
+    apache2_module:
+      name: "{{ item }}"
+      state: present      
+    with_items:
+      - rewrite
+      - headers
+      - wsgi
+      - php7.4
+    when: ansible_distribution == "Ubuntu"         
+         
+
+  - name: Enable service httpd so it autostarts, and not touch the state
+    service:
+      name: httpd
+      enabled: yes    
+    when: ansible_distribution == "CentOS"
+
+  - name: install   mysql python
+    package:
+      name:
+      - MySQL-python
+    when: ansible_distribution == "CentOS"
+ 
+
+     # Install mysqlpython on ubuntu, why this needs pip I dunno
+  #- pip:
+  #    name: MySQL-python
+  #  when: ansible_distribution == "Ubuntu"   
+  #- name: install  pymysql I think for python3
+  #  package:
+  #    name:
+  #    - PyMySQL
+  #  when: ansible_distribution == "Ubuntu"
+    
+
+  # sign on ubuntu its not mysql python apparently
+  - name: install the latest version of mariadb
+    package:
+      name:
+      - mariadb-server  
+      - mariadb-client
+  
+     
+  - name: start mariadb
+    service:
+      name: mariadb
+      enabled: true
+      state: started
+
+
+  #
+  #
+  # Firewall things mainly centos
+  # later add support for uwf on ubuntu
+  #
+  # for readability adding these one at a time
+  #
+  #
+  #
+  # centos
+  #
+
+  - firewalld:
+      service: https
+      permanent: true
+      state: enabled
+      immediate: yes   
+    when: ansible_distribution == "CentOS" 
+
+  - firewalld:
+      service: http
+      permanent: true
+      state: enabled
+      immediate: yes   
+    when: ansible_distribution == "CentOS" 
+
+
+  - name: restart web server
+    service:
+      name: "{{ web_server_program }}"
+      state: restarted
+    
+
+  #later we could add explicit selinux permsisions
+
+  - name: Put SELinux in permissive mode, logging actions that would be blocked.
+    selinux:
+      policy: targeted
+      state: permissive
+    when: ansible_distribution == "CentOS" 
+ 
+ 
+  #remove ddefault apache page
+  # /etc/httpd/conf.d/welcome.conf  
+  - name: remove default apache page LATER DO THIS A BETTER WAY
+    copy:
+      src: "index.html"
+      dest: /var/www/html/index.html
+ 
+  # need to secure mariadb which would normally be
+  # sudo mysql_secure_installation
+  # but suggestion for ansible from  https://stackoverflow.com/questions/25136498/ansible-answers-to-mysql-secure-installation
+  #need to prompt for this somewhere :-)
+  #- name: Sets the root password 
+  #  mysql_user: user=root password="{{mysql_root_password}}" host=localhost 
+  #- name: mysql_root_password
+  #  mysql_user:
+  #      login_user: root
+  #      #login_password: "{{ mysql_root_password }}"
+  #      user: root
+  #      check_implicit_admin: true
+  #      password: "{{ mysql_root_password }}"
+  #      login_unix_socket: /var/run/mysqld/mysql.sock
+  #      host: ''  
+#need to prompt for this somewhere :-)
+
+  - name: Sets the root password 
+    mysql_user: user=root password="{{mysql_root_password}}" host=localhost login_unix_socket=/var/run/mysqld/mysqld.sock
+    when: ansible_distribution == "Ubuntu"
+
+  - name: Sets the root password 
+    mysql_user: user=root password="{{mysql_root_password}}" host=localhost
+    when: ansible_distribution == "CentOS"
+
+ 
+  # not sure we need this for ubuntu
+  - name: copy .my.cnf file with root password credentials
+    template: src=templates/my.cnf.j2 dest=/root/.my.cnf owner=root mode=0600
+
+ 
+  #- name: Deletes anonymous MySQL server user for ansible_fqdn
+  #  mysql_user: user="" host="{{ ansible_fqdn }}" state="absent"
+ 
+  - name: Deletes anonymous MySQL server user for localhost
+    mysql_user: user="" state="absent"  
+
+    # next may fail depends if we alreadyu removed ipv6
+  - name: Secure the root user for IPV6 localhost (::1)
+    mysql_user: login_user=root login_password="{{ mysql_root_password }}" user=root password="{{ mysql_root_password }}" host="::1"
+
+  - name: Secure the root user for IPV4 localhost (127.0.0.1)
+    mysql_user: login_user=root login_password="{{ mysql_root_password }}" user=root password="{{ mysql_root_password }}" host="127.0.0.1"
+
+  - name: Secure the root user for localhost domain
+    mysql_user: login_user=root login_password="{{ mysql_root_password }}" user=root password="{{ mysql_root_password }}" host="localhost"
+
+  - name: Secure the root user for server_hostname domain
+    mysql_user: login_user=root login_password="{{ mysql_root_password }}" user=root password="{{ mysql_root_password }}" host="{{ ansible_fqdn }}"
+
+  - name: Deletes anonymous server user
+    mysql_user: login_user=root login_password="{{ mysql_root_password }}" user="" host_all=yes state=absent
+
+  - name: Removes the test database
+    mysql_db: login_user=root login_password="{{ mysql_root_password }}" db=test state=absent 
+    
+   #we need libsemanage-python
+  #so we can use the next command
+  #- name: get libsemanage-python
+  #  yum: 
+  #    name:  libsemanage-python
+  #    state: present 
+        
+  #and finally have to fix selinux or we get bad gateway
+  #https://stackoverflow.com/questions/23948527/13-permission-denied-while-connecting-to-upstreamnginx
+  # setsebool httpd_can_network_connect on
+  #- name: Set httpd_can_network_connect flag on and keep it persistent across reboots
+  #  seboolean:
+  #    name: httpd_can_network_connect
+  #    state: yes
+  #    persistent: yes
+    
+ 
+  #####################################################################
+  #
+  #
+  # Install phpmyadmin
+  #
+  # some is generic but config/enable is os specific
+  #
+  # Also some specific hack to work around odd ubuntu installer behaviour
+  #
+  #####################################################################
+
+  - name: install php-myadmin
+    package:
+      name:
+        - phpmyadmin
+
+            #############################################
+            #
+            # start ubuntu hack 
+            #
+            #############################################
+            #
+            #
+            # there now follows a hack to work around phpmyadmin not setting up its db user or tables
+            #   #
+            # solution to failed phpmyadmin install https://www.youtube.com/watch?v=oIjnGrBGsPM
+            # mysql -u root -p < /usr/share/doc/phpmyadmin/examples/create_tables.sql 
+            # mysql -u root -p -e 'GRANT SELECT,INSERT,DELETE,UPDATE ON phpmyadmin.* to 'phpmyadmin'@'localhost' IDENTIFIED by "CgC4sFsi4Er7"' ;
+            #
+
+  - name: check if if phpmyadmin Database already exists
+    shell: mysql --host=localhost --user=root --password={{ mysql_root_password }} -e 'SHOW DATABASES;' | grep -c phpmyadmin
+    register: dbstatus
+    failed_when: dbstatus.rc == 2
+    when: ansible_distribution == "Ubuntu"  and ansible_facts['distribution_major_version'] == '20' 
+
+  - debug: msg="{{ dbstatus }}"
+
+  # create phpmyadmin database as ubuntu installer seems to be broken sometimes
+
+  - name: Create the phpmyadmin database for ubuntu
+    mysql_db:
+      name: all
+      state: import
+      target: /usr/share/doc/phpmyadmin/examples/create_tables.sql 
+    when: dbstatus.rc != 0 and ansible_distribution == "Ubuntu"  and ansible_facts['distribution_major_version'] == '20' 
+ 
+              # this is to get the phpmyadmin password the installer created randomly
+              #
+              # we seem to have to retreive this via a bit of sed magic
+              # so regex o get dbpass (?<=^\$dbpass=).*?(?=;)
+              # for grep need grep -Po '(?<=^\$dbpass=).*?(?=;)' config-db.php 
+              # for all the look ahead/behind stuff
+              # (?<=^\$dbpass=')(([^']*))
+              # have to escape the ' so tell grep its a perl format regex and use x27 ffs'
+              # grep -Po '(?<=^\$dbpass=\x27)(([^\x27]*))'  config-db.php 
+
+  - name:  get phpmyadmin password from config
+    #shell: cat /tmp/httpd.conf | grep -v '^#'| grep SSLFile | awk '{print $2}'
+    shell: grep -Po '(?<=^\$dbpass=\x27)(([^\x27]*))'  /etc/phpmyadmin/config-db.php 
+    register: op
+    when: ansible_distribution == "Ubuntu"  and ansible_facts['distribution_major_version'] == '20'
+  - debug:
+      msg: "{{op.stdout_lines}}"
+    when: ansible_distribution == "Ubuntu"  and ansible_facts['distribution_major_version'] == '20'
+  
+
+    # we will need the data we captured from sed earlier...here is a reminder how to do that sort of thing
+    # copy variable to file example note we need to index[0] to get te first item
+    #- name: test thing
+    #  copy:
+    #    content: "{{ op.stdout_lines[0] }}"
+    #    dest: /tmp/whatever.out
+
+  - name: create db phpmyadmin user for api
+    mysql_user:
+      name: "phpmyadmin"
+      password: "{{op.stdout_lines[0]}}"
+      priv: 'phpmyadmin.*:GRANT,SELECT,INSERT,DELETE,UPDATE'
+      state: present
+    when: ansible_distribution == "Ubuntu"  and ansible_facts['distribution_major_version'] == '20'
+
+            #############################################
+            #
+            # end ubuntu hack 
+            #
+            #############################################
+
+ 
+  #enable phpmyadmin for Ubuntu
+  - name: Create symlink for phpmyadmin to apache conf enabled
+    file: src=/etc/phpmyadmin/apache.conf dest=/etc/apache2/conf-available/phpmyadmin.conf state=link
+    when: ansible_distribution == "Ubuntu"
+
+
+            #############################################
+            #                                           #
+            # Limit Access to phpmyadmin by ip number   #
+            #                                           #    
+            # you will be stunned to learn centos and   #
+            # ubuntu done slightly differently          #
+            #                                           #
+            # ###########################################
+
+            # limit access to phpmyadmin on ubuntu
+            # look for line in /etc/apache2/conf-available/phpmyadmin.conf
+            # the sction of phpmyadmin will look like this
+            #
+            #    <Directory /usr/share/phpmyadmin>
+            #    Options SymLinksIfOwnerMatch
+            #    DirectoryIndex index.php
+            #    and needs this two lines   
+            # Require ip 192.168.1.9
+            #     Require ip ::1
+
+  - name: modify phpMyAdmin.conf to only allow specific ip access on Ubuntu , Centos done differently
+    ansible.builtin.lineinfile:
+      path: /etc/apache2/conf-available/phpmyadmin.conf
+      #regexp: '^Listen '
+      insertafter: 'DirectoryIndex index.php'
+      line: "{{ item }}"
+    with_items:
+      - 'Require ip 192.168.1.9'
+      - 'Require ip ::1'
+    when: ansible_distribution == "Ubuntu"  and ansible_facts['distribution_major_version'] == '20'
+
+  # limit access to phpmyadmin on Centos
+  - name: modify phpMyAdmin.conf to only allow specific ip access on CentOS, Ubuntu done differently
+    replace:
+      path: /etc/httpd/conf.d/phpMyAdmin.conf
+      regexp: '127\.0\.0\.1'
+      replace: '{{admin_ip}}'
+      owner: root
+      group: root
+      mode: '0644'    
+    when: ansible_distribution == "CentOS"
+
+  # enable phpyadmin configration (for ubuntu. Centos done differently)
+  - name: Enable apache phpmyadmin configuration
+    command: a2enconf phpmyadmin
+    when: ansible_distribution == "Ubuntu"
+
+
+  # restart and enable webserver
+  - name: restart/enable webserver
+    service:
+      name: "{{ web_server_program }}"
+      state: restarted
+      enabled: true  
+ 
+  - debug:
+      msg: remember if this throws odd db errors , come into this script and read gotchas at enabled and
+
+  - debug:
+      msg: modify phpmyadmin to limit access
+           
+
+#
+#
+# the mysql stuff is a bit circular. if the installe failed things may be confused and not indempotent
+# suggest remove mysql rememeberring whats in va/lib/mysql
+# also remember the my.cnf in /root is a DOT FILE SO HIDDEN. yeh I know.
+#
+#

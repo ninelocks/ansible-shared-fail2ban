@@ -1,0 +1,254 @@
+---
+# tasks file for jtdistf2b_client that install local version of Duhrams fail2ban project
+# only tested as remote client NOT tested on the database server itself.
+#
+#jon.trinder 2021
+#jont@ninelocks.com
+
+#see https://fedoraproject.org/wiki/EPEL I thnk we need epel for f2b, to be tested
+# be here as lamp will have installed it
+#these need a darned good tidy up, these were rapid protoypes
+
+- name: Ensure EPEL is enabled 
+  yum: 
+    name:  https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+    state: present 
+  when: ansible_distribution == "CentOS" 
+
+# maybe need fail2ban fail2ban-server fail2ban-firewall fail2ban-selinux?
+# ou probably already have fail2ban customed install but in case not we install fail2ban here
+
+- name: install required stuff git/fail2ban etc
+  package:
+    name:
+      - git
+      - fail2ban        #we most likely will have already installed our own, but in case not
+      - fail2ban-server 
+      #- fail2ban-firewall
+    state: present    
+
+# Centos wants  fail2ban-selinux
+- name: centos want fail2ban-selinux
+  package:
+    name:
+      - fail2ban-selinux
+    state: present   
+  when: ansible_distribution == "CentOS" 
+
+# Start fail2ban
+- name: Start service fail2ban 
+  service:
+    name: 'fail2ban'
+    state: 'restarted'
+    enabled: true  
+
+
+#mainly during testing but ensure repo not already here
+- name: Ensure repo not already downloaded
+  ansible.builtin.file:
+    path: /tmp/f2b
+    state: absent
+
+# get our sharedfail2ban installer from git.
+- name: get our shared fail2ban installer  from  git..actually full repo
+  git:    
+    repo:  https://github.com/ninelocks/Shared-Fail2Ban.git
+    dest: /tmp/f2b
+    version: moondawn
+  become: yes
+
+# get run our sahredfail2ban installer to give a basic install .  
+- name: try run installer
+  shell: /tmp/f2b/jtf2binstallers/gu_sf2b_client_installer.sh
+  args:
+    chdir: /tmp/f2b/jtf2binstallers
+  become: yes
+
+# configure /etc/fail2ban/action.d/shared-f2b/shared_cfg.py
+- name: Copy  config from template
+  template:
+    src=templates/shared_cfg.py.j2
+    dest=/etc/fail2ban/action.d/shared-f2b/shared_cfg.py 
+
+# copy eh ssh and apache-no-script jails
+- name: Copy jails ssh and the apache no-script
+  copy:
+    src: "{{ item }}"
+    dest: /etc/fail2ban/jail.d/
+    owner: root
+    mode: 0600
+  with_items:
+    - jail-sf2b-ssh.local 
+    - jail-sf2b-apache-noscript.local 
+    
+##
+##
+##
+## inconsistent naming alter in that we call jail apache no script , which it is
+## but the log will be for ssh
+##
+##
+##
+
+# create empty log files to keep fail2ban happy
+- name: Creating an empty log files or fail2ban complain about them  not being there
+  file:
+    path: "{{ item }}"
+    state: touch
+  with_items:  
+    - /etc/fail2ban/action.d/shared-f2b/filter-ssh.log
+    - /etc/fail2ban/action.d/shared-f2b/filter-http.log
+
+# copy simple script to help when testing, to send to the database 
+- name: Copy test sender . script to try sending ban to remote db
+  copy:
+    src: test_sending.sh
+    dest: /etc/fail2ban/action.d/shared-f2b/
+    owner: root
+    mode: 0700
+
+# create a symlink between python and a file called #!/usr/bin/fail2ban-python
+# this so we can use durham script without additional configuration
+- name: Create symlink python to fail2ban-python so we can use durhams scode without changing it
+  file: src=/usr/bin/python dest=/usr/bin/fail2ban-python state=link
+
+#
+# cron jobs to pull  ban/jail inofmation from database
+#
+# currently adding these separately
+#
+# add cron jon for pulling the ssh jail from remote
+#
+
+- name: Add cron job for pulling ssh jail from remote
+  cron:
+    name: "f2bcronssh"
+    minute: "*" 
+    user: root
+    job: /etc/fail2ban/action.d/shared-f2b/get.py 
+
+- name: Add cron job for pulling http jail from remote
+  cron:
+    name: "f2bcron-http"
+    minute: "*" 
+    user: root
+    job: /etc/fail2ban/action.d/shared-f2b/get.py --jail http
+
+# restart fail2ban itself
+- name: reStart service fail2ban 
+  service:
+    name: 'fail2ban'
+    state: 'restarted'
+
+# Enable SELinux
+#- selinux:
+#    policy: targeted
+#    state: enforcing
+
+#- name: Put SELinux in permissive mode, logging actions that would be blocked. LATER SORT SELINUX PROPERLY
+#  selinux:
+#    policy: targeted
+#    state: permissive
+
+# Disable SELinux
+#- selinux:
+#    state: disabled
+
+# cleanup our installer detritus
+- name: Remove installer  repo 
+  ansible.builtin.file:
+    path: /tmp/f2b
+    state: absent
+ 
+# some helpful messages about adding the client info on the database server
+
+- debug:
+    msg: IF ANYTHING WEIRD HAPPENS check SELinux  
+
+- debug:
+    msg: Remember to add client details to server database , there now follows some sql that may help  
+
+- debug:
+    msg: "INSERT INTO `f2b_api` (`key`, `clientip`, `desc`) VALUES ('{{apitoken}}', '{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}', ''); "
+
+#for info the ip information
+- debug: var=hostvars[inventory_hostname]['ansible_default_ipv4']['address']
+- debug: var=hostvars[inventory_hostname]['ansible_default_ipv6']['address']
+
+
+##
+#
+#
+# below some handy notes about debugging fail2ban regeex
+#
+#
+#
+# reminders for the evil that is selinus
+# yum install setroubleshoot setools
+# audit2allow -w -a
+# see also https://www.hpe.com/us/en/insights/articles/how-to-set-up-selinux-right-the-first-time-1901.html
+#
+#
+
+# INSERT INTO `f2b_api` (`key`, `clientip`, `desc`) VALUES ('owls', '192.168.1.249', '');
+#- name: Pause prompt
+#  pause:
+#    prompt: "example of line to show ip of machine we are building{{ ansible_play_hosts[0] }} "
+#    echo: no
+#SELinux may break this, we wrote some modules for our environment but they have not been include in this project yet.
+#- Fail2Ban Client - setsebool -P nis_enabled 1
+#- Fail2Ban API - setsebool -P httpd_can_network_connect_db
+
+    #so we can use the next command
+  #- name: get libsemanage-python
+  #  yum: 
+  #    name:  libsemanage-python
+  #    state: present 
+        
+  #and finally have to fix selinux or we get bad gateway
+  #https://stackoverflow.com/questions/23948527/13-permission-denied-while-connecting-to-upstreamnginx
+  # setsebool httpd_can_network_connect on
+  #- name: Set httpd_can_network_connect flag on and keep it persistent across reboots
+  #  seboolean:
+  #    name: httpd_can_network_connect
+  #    state: yes
+  #    persistent: yes
+    
+  #- debug:
+  #    msg: remember  
+  #- debug:
+  #    msg: remember  
+  #we need libsemanage-python
+  #so we can use the next command
+  #- name: get libsemanage-python
+  #  yum: 
+  #    name:  libsemanage-python
+  #    state: present 
+      
+    
+  #and finally have to fix selinux or we get bad gateway
+  #https://stackoverflow.com/questions/23948527/13-permission-denied-while-connecting-to-upstreamnginx
+  # setsebool httpd_can_network_connect on
+  #- name: Set httpd_can_network_connect flag on and keep it persistent across reboots
+  #  seboolean:
+  #    name: httpd_can_network_connect
+  #    state: yes
+  #    persistent: yes
+
+# fail2ban-client set YOURJAILNAMEHERE unbanip IPADDRESSHERE
+
+#how to test fai2ban regex
+# https://www.hardill.me.uk/wordpress/2020/07/15/creating-fail2ban-rules/
+# https://serverfault.com/questions/1004395/fail2ban-not-banning-regex-shows-many-fails-in-logs
+# fail2ban-regex test.log '\[<HOST>\]'
+#fail2ban name_of_log regexfilterfile
+# assuming we ae in 
+# /etc/fail2ban/action.d/shared-f2b
+
+# fail2ban-regex test.log  /etc/fail2ban/filter.d/shared-f2b-filter.conf 
+#durhams notes
+#### SELinux
+
+#SELinux may break this, we wrote some modules for our environment but they have not been include in this project yet.
+#- Fail2Ban Client - setsebool -P nis_enabled 1
+#- Fail2Ban API - setsebool -P httpd_can_network_connect_db

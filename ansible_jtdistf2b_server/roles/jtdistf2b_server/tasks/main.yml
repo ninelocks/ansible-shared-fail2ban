@@ -1,0 +1,270 @@
+---
+# tasks file for jtdistf2b_server for centos 7 and ubuntu 20.04 ..
+ 
+## this is painful and should be done proerly with variables set on an os basis
+## or tags, or something but while debugging having all the variations in one file makes my life easier ymmv
+# also 
+#### start test area
+
+#when I want to check command out Ive been putting it here so dont wait for entire playbook
+
+###end test area
+
+- name: fiddle factor for using python3 on ubuntu
+  set_fact:
+      ansible_python_interpreter: /usr/bin/python3
+  when: ansible_distribution == "Ubuntu"  and ansible_facts['distribution_major_version'] == '20'   
+
+# some messages so we know what ansible is actually using
+- debug: var=ansible_python_interpreter
+- debug: var=ansible_python_version
+
+# set os specific variables, and yes I know prefixing a name with var is a bit odd
+- name: set variables for Ubuntu install eg web group owner, virtual_env commands
+  set_fact:
+      web_group: www-data
+      var_virtualenv_command: virtualenv
+      var_virtualenv_python: python3.8
+      web_server_program: apache2
+  when: ansible_distribution == "Ubuntu"
+
+- name: set variables for centos eg who  eg web group owner, virtual_env commands 
+  set_fact:
+      web_group: apache
+      var_virtualenv_command: virtualenv-3
+      var_virtualenv_python: python3.6
+      web_server_program: httpd
+  when: ansible_distribution == "CentOS"
+
+
+#see https://fedoraproject.org/wiki/EPEL I thnk we need for python36 virtual env but may 
+# be here as lamp will have installed it
+- name: Ensure EPEL is enabled 
+  yum: 
+    name:  https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+    state: present 
+  when: ansible_distribution == "CentOS" 
+
+# install thins we may need
+- name: install required stuff git etc for centos
+  package:
+    name:
+      - git 
+      - python36
+      - python36-virtualenv
+      - python3-mod_wsgi
+      - python-passlib  #so we can geenrate the htpassword from in here
+    state: present    
+  when: ansible_distribution == "CentOS"
+  #need to differtniate centos 7 and 8      
+
+
+  #sigh lets find whats differeatn about ubuntu     
+- name: install required stuff git etc for ubuntu
+  package:
+    name:
+      - git 
+      - python-setuptools   #added for ubuntu
+      #- python3.6
+      - libapache2-mod-wsgi-py3
+      - python3-virtualenv
+      - python3-passlib  #so we can geenrate the htpassword from in here
+      #- python3-devel 
+      #- mysql-devel
+    state: present    
+  when: ansible_distribution == "Ubuntu"
+
+
+
+
+#- name: get durhams dist f2ban from our own fork
+#  git:    
+#    repo:  https://github.com/ninelocks/Shared-Fail2Ban.git
+#    dest: /tmp/f2b
+#    update: no  #later make this yes 
+
+#mainly during testing but ensure repo not already here
+- name: Ensure repo not already downloaded
+  ansible.builtin.file:
+    path: /tmp/f2b
+    state: absent
+
+- name: get our version of fail2ban installer  from  git currently using branch
+  git:    
+    repo:  https://github.com/ninelocks/Shared-Fail2Ban.git
+    dest: /tmp/f2b
+    version: moondawn
+  become: yes
+  #become_user:  
+
+- name: try run installer which will copy files to jails etc
+  shell: /tmp/f2b/jtf2binstallers/gu_sf2b_server_installer.sh
+  args:
+    chdir: /tmp/f2b/jtf2binstallers
+  become: yes
+
+
+ 
+- name: Create Python virtual env and install  packages inside the virtual env
+  pip:
+    name: 
+      - flask
+      - flask-caching
+      - mysql-connector 
+      - dnspython         #jts preferred dns mechanism
+    virtualenv: /opt/f2bapi # <--- path to user's home folder*
+    virtualenv_command: "{{ var_virtualenv_command}}"
+    virtualenv_site_packages: no   # <---- added this parameter to exclude site packages
+    virtualenv_python: "{{ var_virtualenv_python }}"
+  
+
+
+#set up    wsgi stuff for centos
+- name: Copy  api.conf to web server config ...not sure api a good name maybe f2bapi?  
+  template:
+    src=templates/forwebserver/api.conf.j2
+    dest=/etc/httpd/conf.d/api.conf  
+  when: ansible_distribution == "CentOS"
+
+#set up    wsgi stuff for Ubuntu
+- name: Copy  api.conf to web server config ...not sure api a good name maybe f2bapi?  
+  template:
+    src=templates/forwebserver/api.conf.j2
+    dest=/etc/apache2/conf-available/api.conf  
+  when: ansible_distribution == "Ubuntu"
+
+
+# copy the actual wsgi template and apply our variables
+- name: Copy  wsgi 
+  template:
+    src=templates/api.wsgi.j2 
+    dest=/opt/f2bapi/api.wsgi 
+ 
+# this will speak for itself 
+- name: Copy api_cfg.py 
+  template:
+    src=templates/api_cfg.py.j2
+    dest=/opt/f2bapi/api_cfg.py
+
+
+#
+# set up the database
+#
+# we copy the base-server.sql so we can then import it on the host
+- name: Copy database creator sql statements to guest
+  copy:
+    src: base-server.sql
+    dest: /tmp
+
+# not convinced about this check  but should check if db already exists
+- name: check if if f2b Database already exists
+  shell: mysql --host=localhost --user=root --password={{ mysql_root_password }} -e 'SHOW DATABASES;' | grep -c f2b
+  register: dbstatus
+  failed_when: dbstatus.rc == 2
+
+# some debug info so can see what value was returned
+- debug: msg="{{ dbstatus }}"
+
+# reminder that we could use gz files
+#    - name: Import database schema
+#      mysql_db:
+#        name: some_db
+#        state: import
+#        target: database.sql.gz
+#      when: database_exists.changed
+
+#- meta: end_play
+
+# create the f2b database
+- name: Create the f2b database by using the base-server.sql data
+  mysql_db:
+    name: all
+    state: import
+    target: /tmp/base-server.sql
+  when: dbstatus.rc != 0 
+
+# create the f2b user, using variable the playbook promoted for   
+- name: create db f2b user for api
+  mysql_user:
+ 
+    name: "{{db_user}}"
+    password: "{{db_pass}}"
+    priv: 'f2b.*:GRANT,INSERT,SELECT'
+    state: present
+
+# copy web page across that shows the bans
+- name: Copy web page
+  copy:
+    src:  files/f2bweb
+    dest: /var/www/html/
+
+# copy/populate config file  with username/password for web page so it can access the db
+- name: copy/populate config file for web page so it can access the db
+  template:
+    src=templates/config.php.j2
+    dest=/var/www/html/f2bweb/config.php
+
+# Copy httpd conf  with the enable htaccess stuff inside it.
+# this could go and mofiy values instead
+- name: Copy htptd conf with the enable htaccess stuff
+  copy:
+    src: httpd.conf
+    dest: /etc/httpd/conf/httpd.conf
+  when: ansible_distribution == "CentOS"    
+
+# set up the htaccess password file and create the user/password
+- name: Add a user to a htpassword file and ensure permissions are set
+  htpasswd:
+    path: /var/www/data/f2bhtpasswd
+    name: "{{htaccess_username}}"
+    password: "{{htaccess_password}}"
+    owner: root
+    group: "{{web_group}}"  #group isnt aapche on ubuntu
+    mode: 0640
+ 
+
+#we need libsemanage-python
+#so we can use the next command
+- name: get libsemanage-python
+  yum: 
+    name:  libsemanage-python
+    state: present 
+  when: ansible_distribution == "CentOS"     
+  
+#and finally have to fix selinux or we get bad gateway
+#https://stackoverflow.com/questions/23948527/13-permission-denied-while-connecting-to-upstreamnginx
+# setsebool httpd_can_network_connect on
+
+- name: Set httpd_can_network_connect flag on and keep it persistent across reboots
+  seboolean:
+    name: httpd_can_network_connect
+    state: yes
+    persistent: yes
+  when: ansible_distribution == "CentOS"     
+# yeh we could make these actions....
+
+#restart web server, we could have made this fancier and just have the web server name
+- name: restart apache or httpd as appropriate
+  service:
+    name: "{{ web_server_program }}"
+    state: restarted
+
+
+# cleanup our installer detritus
+# could I suppose combine in a list of items but for now, keep separate
+- name: Remove installer files, repo, sql and so on
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  with_items:  
+    - /tmp/base-server.sql
+    - /tmp/f2b
+
+
+ 
+#durhams notes
+#### SELinux
+
+#SELinux may break this, we wrote some modules for our environment but they have not been include in this project yet.
+#- Fail2Ban Client - setsebool -P nis_enabled 1
+#- Fail2Ban API - setsebool -P httpd_can_network_connect_db

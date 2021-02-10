@@ -1,0 +1,41 @@
+ 
+- name: jtlaml  deployment playbook
+  hosts: all
+  #connection: local
+  become: yes
+  become_method: sudo
+  gather_facts: yes
+  #no_log: True
+  #remote_user: vagrant
+  #vars:
+  #    ansible_python_interpreter: /usr/bin/python3
+  ##  mysql_root_password: ***REMOVED***
+  #  owncloudsqlpw: ***REMOVED***
+  #  owncloud_data: /var/www/owncloud
+  # dont go pythong 3 :-) for centos 7 you get into dnf /yum hell
+  vars_prompt:
+    - name: mysql_root_password
+      prompt: "Please enter the value for sql root password"
+      private: no 
+    - name: admin_ip
+      prompt: "Please enter the value for admin ip allow"
+      private: no 
+
+  #  - name: owncloudsqlpw
+  #    prompt: "Please enter the value for owncloud sql password"
+  #    private: no       
+
+  #  - name: owncloud_data
+  #    prompt: "Please enter the value for data folder mainly for logrotatees benefit"
+  #    private: no 
+  #
+  #  - name: apachewebaddress
+  #    prompt: "Please enter web address of apache"
+  #    private: no 
+
+ 
+  
+  roles:
+    - jtlamp
+ 
+  

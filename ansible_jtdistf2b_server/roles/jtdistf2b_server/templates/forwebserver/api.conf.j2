@@ -1,0 +1,33 @@
+Listen {{api_port}}
+NameVirtualHost *:{{api_port}}
+<VirtualHost *:{{api_port}}>
+
+# note from jon t
+# if wanting to leave the api at root, but get access to the web page 
+# and use htaccess 
+# comment out  listen and namevirtuaolhost above
+# then uncomment below
+# DocumentRoot /var/www/html/
+#    Alias /f2bweb/ /var/www/html/f2bweb/
+#    <Directory /var/www/html>
+#    <IfVersion < 2.4>
+#        Order allow,deny
+#        Allow from all
+#    </IfVersion>
+#    <IfVersion >= 2.4>
+#        Require all granted
+#    </IfVersion>
+#    </Directory>
+
+     #ServerName $APIHOST
+     #ServerAlias $APIALT
+     WSGIScriptAlias / /opt/f2bapi/api.wsgi
+     <Directory /opt/f2bapi>
+                # set permissions as per apache2.conf file
+            Options FollowSymLinks
+            AllowOverride None
+            Require all granted
+     </Directory>
+     LogLevel warn
+</VirtualHost>
+

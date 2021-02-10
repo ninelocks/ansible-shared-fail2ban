@@ -1,0 +1,47 @@
+ 
+- name: jtf2b  deployment playbook
+  # for setting up the durham fail2ban project as dev environs for jont@ninelocks
+  hosts: all
+  #connection: local
+  become: yes
+  become_method: sudo
+ 
+  #vars:
+  #  f2b_home: /opt
+ 
+
+  vars_prompt:
+    - name: mysql_root_password
+      prompt: "Please enter the value for sql root password"
+      private: no 
+
+      # these used as the use we create for the api to access the database
+    - name: db_user
+      prompt: "Please enter the value for api USERNAME to use for DB (only if on server)"
+      private: no 
+    - name: db_pass
+      prompt: "Please enter the value for api PASSWORD to use for DB"
+      private: no             
+
+    - name: apiurl
+      prompt: "Please enter IP address of database server"
+      private: no  
+
+    - name: apitoken
+      prompt: "Please enter apitoken for this client"
+      private: no  
+
+    - name: api_or_sql
+      prompt: "data source api_or_sql (its api for remote clients :-) )"
+      default: "api"
+      private: no  
+
+    - name: api_port
+      prompt: "api port number ..normally 5000 )"
+      default: "5000"
+      private: no  
+
+  roles:
+    - jtdistf2b_client
+ 
+  
