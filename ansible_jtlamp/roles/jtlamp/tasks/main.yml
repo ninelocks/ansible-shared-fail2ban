@@ -158,7 +158,7 @@
     package:
       name:
       - mariadb-server  
-      - mariadb-client
+      #- mariadb-client
   
      
   - name: start mariadb
@@ -330,13 +330,15 @@
 
   # create phpmyadmin database as ubuntu installer seems to be broken sometimes
 
-  - name: Create the phpmyadmin database for ubuntu
+  - name: Create the phpmyadmin database ..mainly for for ubuntu but wont harm being here
     mysql_db:
       name: all
       state: import
       target: /usr/share/doc/phpmyadmin/examples/create_tables.sql 
-    when: dbstatus.rc != 0 and ansible_distribution == "Ubuntu"  and ansible_facts['distribution_major_version'] == '20' 
- 
+    when: dbstatus.rc  | default ('') != 0 and ansible_distribution == "Ubuntu"  and ansible_facts['distribution_major_version'] == '20' 
+    # the or default above is fiddle for when on centos dbstatus.rc wont exist as
+    # aboce wont have run the check if phpmyadmin deb exists
+    
               # this is to get the phpmyadmin password the installer created randomly
               #
               # we seem to have to retreive this via a bit of sed magic
