@@ -43,6 +43,7 @@
     enabled: true  
 
 
+
 #mainly during testing but ensure repo not already here
 - name: Ensure repo not already downloaded
   ansible.builtin.file:
@@ -153,6 +154,16 @@
   service:
     name: 'fail2ban'
     state: 'restarted'
+
+#enable selinux as per durham Fail2Ban Client - setsebool -P nis_enabled 1
+#left as list in case we need other things later.
+- name: Enabling selinux booleans
+  seboolean:
+    name: "{{ item }}"
+    persistent: yes
+    state: yes
+  with_items:
+    - nis_enabled
 
 # Enable SELinux
 #- selinux:

@@ -243,6 +243,16 @@
   when: ansible_distribution == "CentOS"     
 # yeh we could make these actions....
 
+- name: open firewall on the port we are using
+  firewalld:
+    port: "{{ api_port }}/tcp"
+    permanent: true
+    state: enabled
+    immediate: yes   
+  when: ansible_distribution == "CentOS" 
+
+
+
 #restart web server, we could have made this fancier and just have the web server name
 - name: restart apache or httpd as appropriate
   service:
