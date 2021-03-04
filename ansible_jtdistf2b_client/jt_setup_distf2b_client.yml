@@ -48,5 +48,9 @@
 
   roles:
     - jtdistf2b_client
+  #if behing proxy may need to set thsi
+  #environment:
+  #  http_proxy: http://
+  #  https_proxy: https://   
  
   
